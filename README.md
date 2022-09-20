@@ -16,6 +16,16 @@ Other versions have not been tested
 
 ![demo-16-1600](./screen/play_test_16_1600.png)
 
+it easy to use: 
+
+```c++
+QString audioFile = "D:/test.wav";
+XAudioSound *pSoundPlay = new XAudioSound;
+bool bResult = pSoundPlay->play(audioFile);
+```
+
+now you can hear the sound playing
+
 
 
 ## about author
@@ -24,9 +34,15 @@ Other versions have not been tested
 - **GitHub**  - [kevinlq](https://github.com/kevinlq)https://github.com/kevinlq 
 - **Email:** kevinlq0912@gmail.com
 
-#### <i class="fa fa-eye"></i> If you think it is useful to you, welcome to Star and Fork, you can follow the public account
+####  If you think it is useful to you, welcome to Star and Fork, you can follow the public account
 
 ![thanks](./screen/qrcode_for_devstone.png)
 
 
 
+
+
+## refer to
+
+- [Miscrosoft doc](https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-introduction)
+- [xaudio2 play pcm data](https://www.cnblogs.com/lidabo/p/6834925.html)
