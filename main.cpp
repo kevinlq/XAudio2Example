@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
     QTextCodec::setCodecForCStrings(codec);
     QTextCodec::setCodecForTr(codec);
 #else
-    QTextCodec *codec = QTextCodec::codecForName("utf-8");
+    QTextCodec *codec = QTextCodec::codecForName("gbk");
     QTextCodec::setCodecForLocale(codec);
 #endif
 

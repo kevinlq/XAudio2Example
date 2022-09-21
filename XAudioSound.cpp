@@ -1,4 +1,4 @@
-#include "XAudioSound.h"
+﻿#include "XAudioSound.h"
 
 #include "AudioFile.h"
 
@@ -232,7 +232,7 @@ bool XAudioSound::play(const QString &audioFile)
 
     // open wav audio file
     AudioFile<float> wavAudioFile;
-    if(!wavAudioFile.load(audioFile.toStdString()))
+    if(!wavAudioFile.load(audioFile.toLocal8Bit().toStdString()))
     {
         qDebug() << "load wav file fail.." << audioFile;
         return false;
@@ -294,6 +294,7 @@ bool XAudioSound::play(const QString &audioFile)
         m_pImpl->m_pSourceVoice = nullptr;
     }
 
+
     //创建源声音。用来提交数据.
     HRESULT hr = m_pImpl->m_pEngine->CreateSourceVoice(&m_pImpl->m_pSourceVoice,&waveFormat, 0, 1.0f, m_pImpl->m_pCallback);
     if (FAILED(hr))
@@ -301,6 +302,24 @@ bool XAudioSound::play(const QString &audioFile)
         qDebug() << "CreateSourceVoice error..";
         return false;
     }
+
+    {
+        float fMatrix[2] = {0};
+        m_pImpl->m_pSourceVoice->GetOutputMatrix(m_pImpl->m_pSourceVoice, 1, 2, fMatrix);
+        fMatrix[0] = 1.0;
+        fMatrix[1] = 0.0;
+//        fMatrix[2] = 0.0;
+//        fMatrix[3] = 0.0;
+//        fMatrix[4] = 0.0;
+//        fMatrix[5] = 0.0;
+        hr = m_pImpl->m_pSourceVoice->SetOutputMatrix(m_pImpl->m_pSourceVoice,1,2, fMatrix);
+        if (FAILED(hr))
+        {
+            qDebug() << "SetOutputMatrix error..";
+            //return false;
+        }
+    }
+
 
     //提交内存数据
     hr = m_pImpl->m_pSourceVoice->SubmitSourceBuffer(&m_pImpl->buffer, nullptr);
