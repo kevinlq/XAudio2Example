@@ -5,6 +5,7 @@
 // xaudio lib file
 #include <xaudio2.h>
 #include <comdef.h>
+#include <wrl\client.h>
 
 // Qt lib file
 #include <QDebug>
@@ -44,6 +45,64 @@ public:
         qDebug() << "voice error:" << Error;
     }
 };
+
+struct AudioWavDataInfo
+{
+    WAVEFORMATEX *pWaveFormat = nullptr;
+    BYTE *pData = nullptr;
+    DWORD fSize = 0;
+
+    AudioWavDataInfo()
+    {
+        pWaveFormat = new WAVEFORMATEX;
+    }
+
+    ~AudioWavDataInfo()
+    {
+        if (nullptr != pWaveFormat)
+        {
+            delete pWaveFormat;
+            pWaveFormat = nullptr;
+        }
+
+        if(nullptr != pData)
+        {
+            delete pData;
+            pData = nullptr;
+        }
+    }
+};
+
+bool getAudioContent(const QString &audioFile, AudioWavDataInfo *pAudioFile)
+{
+    AudioFile<float> wavAudioFile(audioFile.toStdString());
+
+    pAudioFile->pWaveFormat->nChannels = wavAudioFile.getNumChannels();
+    pAudioFile->pWaveFormat->wBitsPerSample = wavAudioFile.getBitDepth();
+    pAudioFile->pWaveFormat->nSamplesPerSec = wavAudioFile.getSampleRate();
+
+    DWORD dataSize = wavAudioFile.getNumSamplesPerChannel() * wavAudioFile.getNumChannels();
+    pAudioFile->pData = new BYTE[dataSize];
+    memset(pAudioFile->pData, 0, dataSize);
+
+    FILE *inputFile = fopen(audioFile.toLocal8Bit(), "rb");
+    if (nullptr == inputFile)
+    {
+        qDebug() << "fopen error.." << dataSize << audioFile;
+        return false;
+    }
+
+    size_t readSize = fread(pAudioFile->pData, sizeof(BYTE), dataSize, inputFile);
+    if (readSize != dataSize)
+    {
+        qDebug() << "readSize error.." << readSize << dataSize;
+        return false;
+    }
+
+    fclose(inputFile);
+
+    return true;
+}
 
 class XAudioSoundImpl
 {
@@ -146,6 +205,174 @@ XAudioSound::~XAudioSound()
 {
     delete m_pImpl;
     m_pImpl = nullptr;
+}
+
+//using namespace Microsoft::WRL;
+bool XAudioSound::mulAudioPlayTest()
+{
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(hr))
+        return false;
+
+    Microsoft::WRL::ComPtr<IXAudio2 >pEngine;
+    hr = XAudio2Create(&pEngine);
+    if (FAILED(hr))
+        return false;
+
+    WAVEFORMATEX waveFormatex;//设置主声音的格式
+    waveFormatex.nChannels = 2;
+    waveFormatex.nSamplesPerSec = 48000;
+    waveFormatex.wBitsPerSample = 32;
+    waveFormatex.nAvgBytesPerSec = 384000;
+    waveFormatex.nBlockAlign = 8;
+    waveFormatex.wFormatTag = WAVE_FORMAT_PCM;
+
+    IXAudio2MasteringVoice *pMasterVoice = nullptr;
+    hr = pEngine->CreateMasteringVoice(&pMasterVoice,waveFormatex.nChannels,waveFormatex.nSamplesPerSec);//创建主声音。默认是输出当前扬声器
+    if (FAILED(hr))
+    {
+        pEngine.Reset();
+        return false;
+    }
+
+    XAUDIO2_SEND_DESCRIPTOR pSend;
+    pSend.pOutputVoice = pMasterVoice;//指定输出为mastering voice
+    pSend.Flags = XAUDIO2_SEND_USEFILTER;
+
+    XAUDIO2_VOICE_SENDS pSendList;
+    pSendList.pSends = &pSend;
+    pSendList.SendCount = 1;
+
+    IXAudio2SubmixVoice *pSubmixVoice = nullptr;
+    //指定输出为mastering voice,作用：混音，将两路音频数据混为一路并输出到mastering voice
+    hr = pEngine->CreateSubmixVoice(&pSubmixVoice, waveFormatex.nChannels, waveFormatex.nSamplesPerSec, 0, 0, &pSendList);
+    if (FAILED(hr))
+    {
+        pMasterVoice->DestroyVoice();
+        pEngine.Reset();
+        return false;
+    }
+
+    WAVEFORMATEX *waveFormat1, *waveFormat2;
+
+    pSend.pOutputVoice = pSubmixVoice;//指定输出为SubmixVoice
+
+    IXAudio2SubmixVoice *pSubmixVoice1 = nullptr;
+    //指定输出为pSubmixVoice,作用：对文件1的音频数据进行重採样为mastering voice的採样率
+    hr = pEngine->CreateSubmixVoice(&pSubmixVoice1, waveFormat1->nChannels, waveFormat1->nSamplesPerSec, 0, 0, &pSendList);
+    if (FAILED(hr))
+    {
+        pMasterVoice->DestroyVoice();
+        pEngine.Reset();
+        return false;
+    }
+
+    IXAudio2SubmixVoice *pSubmixVoice2 = nullptr;
+    //指定输出为pSubmixVoice,作用：对文件2的音频数据进行重採样为mastering voice的採样率
+    hr = pEngine->CreateSubmixVoice(&pSubmixVoice2, waveFormat2->nChannels, waveFormat2->nSamplesPerSec, 0, 0, &pSendList);
+    if (FAILED(hr))
+    {
+        pSubmixVoice1->DestroyVoice();
+        pMasterVoice->DestroyVoice();
+        pEngine.Reset();
+        return false;
+    }
+
+    pSend.pOutputVoice = pSubmixVoice1;//指定输出为pSubmixVoice1
+
+    VoiceCallback voiceCallBack1;
+    IXAudio2SourceVoice *pSourceVoice1 = nullptr;
+
+    //创建源声音。用来提交数据.指定输出为SubmixVoice1
+    hr = pEngine->CreateSourceVoice(&pSourceVoice1, waveFormat1, 0, 1.0f, &voiceCallBack1,&pSendList);
+    if (FAILED(hr))
+    {
+        pSubmixVoice1->DestroyVoice();
+        pSubmixVoice2->DestroyVoice();
+        pMasterVoice->DestroyVoice();
+        pEngine.Reset();
+        return false;
+    }
+
+    pSend.pOutputVoice = pSubmixVoice2;//指定输出为pSubmixVoice2
+
+    VoiceCallback voiceCallBack2;
+    IXAudio2SourceVoice *pSourceVoice2 = nullptr;
+    //创建源声音，用来提交数据.指定输出为SubmixVoice2
+    hr = pEngine->CreateSourceVoice(&pSourceVoice2, waveFormat2, 0, 1.0f, &voiceCallBack2, &pSendList);
+    if (FAILED(hr))
+    {
+        pSubmixVoice1->DestroyVoice();
+        pSubmixVoice2->DestroyVoice();
+        pMasterVoice->DestroyVoice();
+        pEngine.Reset();
+        return false;
+    }
+
+    QString audioFile1 = "D:/testFile1.wav";
+    QString audioFile2 = "D:/testFile2.wav";
+
+    AudioWavDataInfo audioWavDataInfo1;
+    AudioWavDataInfo audioWavDataInfo2;
+    if(!getAudioContent(audioFile1, &audioWavDataInfo1)
+            || !getAudioContent(audioFile2, &audioWavDataInfo2))
+    {
+        return false;
+    }
+
+    XAUDIO2_BUFFER buffer1 = {0};//将读取的文件数据，赋值XAUDIO2_BUFFER
+    buffer1.AudioBytes = audioWavDataInfo1.fSize;
+    buffer1.pAudioData = audioWavDataInfo1.pData;
+    buffer1.Flags = XAUDIO2_END_OF_STREAM;
+
+    XAUDIO2_BUFFER buffer2 = { 0 };//将读取的文件数据。赋值XAUDIO2_BUFFER
+    buffer2.AudioBytes = audioWavDataInfo2.fSize;
+    buffer2.pAudioData = audioWavDataInfo2.pData;
+    buffer2.Flags = XAUDIO2_END_OF_STREAM;
+
+    hr = pSourceVoice1->SubmitSourceBuffer(&buffer1);//提交内存数据
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = pSourceVoice2->SubmitSourceBuffer(&buffer2);//提交内存数据
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = pSourceVoice1->Start(0);//启动源声音
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = pSourceVoice2->Start(0);//启动源声音
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    XAUDIO2_VOICE_STATE state;
+    pSourceVoice1->GetState(&state);//获取状态
+    while (state.BuffersQueued)
+    {
+        WaitForSingleObject(voiceCallBack1.hBufferEndEvent, INFINITE);
+        pSourceVoice2->GetState(&state);
+        WaitForSingleObject(voiceCallBack2.hBufferEndEvent, INFINITE);
+    }
+
+    pMasterVoice->DestroyVoice();//释放资源
+    pSubmixVoice->DestroyVoice();//
+    pSubmixVoice1->DestroyVoice();//
+    pSubmixVoice2->DestroyVoice();//
+    pSourceVoice1->DestroyVoice();//释放资源
+    pSourceVoice2->DestroyVoice();//释放资源
+    pEngine->Release();//释放资源
+    CoUninitialize();//释放资源
+
+    return true;
 }
 
 bool XAudioSound::playAudio(const QStringList &audioFileList)
@@ -308,10 +535,10 @@ bool XAudioSound::play(const QString &audioFile)
         m_pImpl->m_pSourceVoice->GetOutputMatrix(m_pImpl->m_pSourceVoice, 1, 2, fMatrix);
         fMatrix[0] = 1.0;
         fMatrix[1] = 0.0;
-//        fMatrix[2] = 0.0;
-//        fMatrix[3] = 0.0;
-//        fMatrix[4] = 0.0;
-//        fMatrix[5] = 0.0;
+        //        fMatrix[2] = 0.0;
+        //        fMatrix[3] = 0.0;
+        //        fMatrix[4] = 0.0;
+        //        fMatrix[5] = 0.0;
         hr = m_pImpl->m_pSourceVoice->SetOutputMatrix(m_pImpl->m_pSourceVoice,1,2, fMatrix);
         if (FAILED(hr))
         {
@@ -339,11 +566,11 @@ bool XAudioSound::play(const QString &audioFile)
 
     XAUDIO2_VOICE_STATE state;
     m_pImpl->m_pSourceVoice->GetState(&state); //获取状态
-//    while (state.BuffersQueued)
-//    {
-//        WaitForSingleObject(voiceCallBack.hBufferEndEvent, INFINITE);
-//        m_pImpl->m_pSourceVoice->GetState(&state);
-//    }
+    //    while (state.BuffersQueued)
+    //    {
+    //        WaitForSingleObject(voiceCallBack.hBufferEndEvent, INFINITE);
+    //        m_pImpl->m_pSourceVoice->GetState(&state);
+    //    }
 
     qDebug() << "end info m_pEngine|m_pMasterVoice|m_pSourceVoice|:" << m_pImpl->m_pEngine << m_pImpl->m_pMasterVoice << m_pImpl->m_pSourceVoice;
 
