@@ -46,3 +46,4 @@ now you can hear the sound playing
 
 - [Miscrosoft doc](https://learn.microsoft.com/en-us/windows/win32/xaudio2/xaudio2-introduction)
 - [xaudio2 play pcm data](https://www.cnblogs.com/lidabo/p/6834925.html)
+- [dounaite](https://www.dounaite.com/article/6256f0967cc4ff68e649d843.html)
